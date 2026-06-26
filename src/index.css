@@ -1,0 +1,79 @@
+﻿@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: #f3f4f6;
+}
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.5s ease-out forwards;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.4s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+/* Animated Back Button Styles */
+.back-btn {
+  @apply flex items-center gap-2 text-gray-600 hover:text-purple-600 mb-6 transition-all duration-300 font-medium;
+}
+
+.back-btn:hover {
+  @apply translate-x-[-4px];
+}
+
+.back-btn svg {
+  @apply transition-transform duration-300;
+}
+
+.back-btn:hover svg {
+  @apply -translate-x-1;
+}
+
+/* Active/click animation */
+.back-btn:active {
+  @apply scale-95;
+}
