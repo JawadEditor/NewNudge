@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../../services/supabase.js'
 
 const AcceptInvitation = () => {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const token = searchParams.get('token')
 
   const [invitation, setInvitation] = useState(null)
@@ -26,15 +27,33 @@ const AcceptInvitation = () => {
 
   const fetchInvitation = async () => {
     try {
+      // First try to find the invitation by token
       const { data, error } = await supabase
         .from('invitations')
         .select('*')
         .eq('token', token)
-        .eq('status', 'pending')
         .single()
 
       if (error || !data) {
-        setError('This invitation is invalid, expired, or has already been used')
+        setError('This invitation link is invalid or has expired')
+        setLoading(false)
+        return
+      }
+
+      // Check if already accepted
+      if (data.status === 'accepted') {
+        setError('This invitation has already been accepted. Please sign in to access the project.')
+        setLoading(false)
+        return
+      }
+
+      // Check if expired (7 days)
+      const createdDate = new Date(data.created_at)
+      const now = new Date()
+      const diffDays = (now - createdDate) / (1000 * 60 * 60 * 24)
+
+      if (diffDays > 7) {
+        setError('This invitation has expired. Please ask the project owner to send a new invitation.')
         setLoading(false)
         return
       }
@@ -58,7 +77,7 @@ const AcceptInvitation = () => {
       setLoading(false)
     } catch (err) {
       console.error('Error fetching invitation:', err)
-      setError('Failed to load invitation')
+      setError('Failed to load invitation. Please try again or contact support.')
       setLoading(false)
     }
   }
@@ -113,26 +132,39 @@ const AcceptInvitation = () => {
   }
 
   const joinProject = async (userId) => {
-    // Add user to project_members
-    const { error: memberError } = await supabase
-      .from('project_members')
-      .insert([{
-        project_id: invitation.project_id,
-        user_id: userId,
-        email: email,
-        role: invitation.role,
-        status: 'active'
-      }])
+    try {
+      // Add user to project_members
+      const { error: memberError } = await supabase
+        .from('project_members')
+        .insert([{
+          project_id: invitation.project_id,
+          user_id: userId,
+          email: email,
+          role: invitation.role,
+          status: 'active'
+        }])
 
-    if (memberError) throw memberError
+      if (memberError) throw memberError
 
-    // Update invitation status
-    const { error: inviteError } = await supabase
-      .from('invitations')
-      .update({ status: 'accepted' })
-      .eq('id', invitation.id)
+      // Update invitation status
+      const { error: inviteError } = await supabase
+        .from('invitations')
+        .update({ status: 'accepted' })
+        .eq('id', invitation.id)
 
-    if (inviteError) throw inviteError
+      if (inviteError) throw inviteError
+    } catch (err) {
+      console.error('Error joining project:', err)
+      throw err
+    }
+  }
+
+  const handleGoToLogin = () => {
+    navigate('/login')
+  }
+
+  const handleGoToDashboard = () => {
+    navigate('/')
   }
 
   if (loading) {
@@ -156,9 +188,12 @@ const AcceptInvitation = () => {
           <p className="text-gray-500 mb-6">
             You have successfully joined the project.
           </p>
-          <a href="/" className="inline-block px-6 py-3 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 transition">
+          <button 
+            onClick={handleGoToDashboard}
+            className="inline-block px-6 py-3 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 transition"
+          >
             Go to Dashboard
-          </a>
+          </button>
         </div>
       </div>
     )
@@ -174,7 +209,13 @@ const AcceptInvitation = () => {
             </svg>
           </div>
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Invitation Error</h1>
-          <p className="text-gray-500">{error}</p>
+          <p className="text-gray-500 mb-6">{error}</p>
+          <button 
+            onClick={handleGoToLogin}
+            className="px-6 py-3 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 transition"
+          >
+            Go to Login
+          </button>
         </div>
       </div>
     )
