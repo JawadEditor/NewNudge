@@ -6,7 +6,6 @@ import { useNavigate } from 'react-router-dom';
 const InviteMembers = ({ project, onBack, onLogout }) => {
   const navigate = useNavigate();
   const [emails, setEmails] = useState('');
-  const [role, setRole] = useState('member');  // Changed default to 'member' - most common default
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
@@ -16,62 +15,13 @@ const InviteMembers = ({ project, onBack, onLogout }) => {
   const [currentProject, setCurrentProject] = useState(project || {});
   const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState(project?.id || '');
-  const [dbRoles, setDbRoles] = useState([]); // Store valid roles from DB
-
-  // Default roles - will be overridden if DB has different constraints
-  const defaultRoles = [
-    { value: 'admin', label: 'Admin', description: 'Full access to all project settings, members, and tickets.', icon: '👑' },
-    { value: 'member', label: 'Member', description: 'Standard project member access.', icon: '👤' },
-    { value: 'developer', label: 'Developer', description: 'Can create and manage tickets, view project details.', icon: '💻' },
-    { value: 'designer', label: 'Designer', description: 'Can view and comment on tickets, upload design assets.', icon: '🎨' },
-    { value: 'qa', label: 'QA', description: 'Can create bug reports, test tickets, and add comments.', icon: '🧪' }
-  ];
 
   useEffect(() => {
     if (!project?.id) {
       fetchProjects();
     }
     fetchInvitations();
-    fetchValidRoles(); // Check what roles the DB actually accepts
   }, [project]);
-
-  // Fetch valid roles from database check constraint
-  const fetchValidRoles = async () => {
-    try {
-      // Try to get the constraint info by testing inserts
-      const testRoles = ['admin', 'member', 'developer', 'viewer', 'owner', 'user'];
-      const validRoles = [];
-
-      for (const testRole of testRoles) {
-        try {
-          // Try a test insert (will rollback)
-          const { error } = await supabase
-            .from('invitations')
-            .insert({
-              project_id: selectedProjectId || '00000000-0000-0000-0000-000000000000',
-              email: 'test@example.com',
-              role: testRole,
-              invited_by: '00000000-0000-0000-0000-000000000000',
-              status: 'pending',
-              token: 'test-token'
-            });
-
-          if (!error || !error.message.includes('check constraint')) {
-            validRoles.push(testRole);
-          }
-        } catch (e) {
-          // Ignore
-        }
-      }
-
-      console.log('Valid DB roles detected:', validRoles);
-      if (validRoles.length > 0) {
-        setDbRoles(validRoles);
-      }
-    } catch (err) {
-      console.log('Could not detect valid roles, using defaults');
-    }
-  };
 
   const fetchProjects = async () => {
     try {
@@ -143,26 +93,10 @@ const InviteMembers = ({ project, onBack, onLogout }) => {
 
       const senderName = profileData?.full_name || userData.user.email;
 
-      // Determine valid role - try to match DB constraint
-      // Common valid values: 'admin', 'member', 'viewer', 'owner'
-      let validRole = role;
-
-      // If we detected DB roles, use the first matching one
-      if (dbRoles.length > 0 && !dbRoles.includes(role)) {
-        validRole = dbRoles[0]; // Use first valid role as fallback
-        console.log(`Role '${role}' not valid, using '${validRole}' instead`);
-      }
-
-      // If still not sure, try 'member' as safest default
-      if (!validRole) validRole = 'member';
-
-      console.log('Using role:', validRole);
-
-      // Generate invitation data
+      // Generate invitation data - no role, just member
       const invitationsData = emailList.map(email => ({
         project_id: projectId,
         email: email,
-        role: validRole,
         invited_by: userData.user.id,
         status: 'pending',
         token: crypto.randomUUID(),
@@ -171,7 +105,7 @@ const InviteMembers = ({ project, onBack, onLogout }) => {
 
       console.log('Creating invitations:', invitationsData);
 
-      // Try to insert
+      // Insert invitations
       const { data: savedInvites, error: dbError } = await supabase
         .from('invitations')
         .insert(invitationsData)
@@ -182,12 +116,6 @@ const InviteMembers = ({ project, onBack, onLogout }) => {
 
       if (dbError) {
         console.error('Database error details:', dbError);
-
-        // If constraint error, show helpful message
-        if (dbError.message.includes('check constraint')) {
-          throw new Error(`Invalid role: '${role}'. The database only accepts specific role values. Please check your database schema or use a different role.`);
-        }
-
         throw new Error(`Database error: ${dbError.message}`);
       }
 
@@ -209,7 +137,6 @@ const InviteMembers = ({ project, onBack, onLogout }) => {
               to_email: invite.email,
               to_name: invite.email.split('@')[0],
               project_name: currentProject.name || 'Project',
-              role: roles.find(r => r.value === role)?.label || role,
               invite_link: inviteLink,
               sender_name: senderName
             });
@@ -259,7 +186,6 @@ const InviteMembers = ({ project, onBack, onLogout }) => {
           to_email: invite.email,
           to_name: invite.email.split('@')[0],
           project_name: currentProject.name || 'Project',
-          role: roles.find(r => r.value === invite.role)?.label || invite.role,
           invite_link: inviteLink,
           sender_name: senderName
         });
@@ -288,16 +214,6 @@ const InviteMembers = ({ project, onBack, onLogout }) => {
     }
   };
 
-  // Use DB roles if detected, otherwise use defaults
-  const roles = dbRoles.length > 0 
-    ? dbRoles.map(r => ({ 
-        value: r, 
-        label: r.charAt(0).toUpperCase() + r.slice(1), 
-        description: `Role: ${r}`,
-        icon: '👤'
-      }))
-    : defaultRoles;
-
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -313,11 +229,11 @@ const InviteMembers = ({ project, onBack, onLogout }) => {
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center text-xl">
-              {currentProject.icon}
+              {currentProject.icon || '📧'}
             </div>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Invite Members</h1>
-              <p className="text-gray-600">Add new members to {currentProject.name} and give them access to this project.</p>
+              <p className="text-gray-600">Add new members to {currentProject.name || 'your project'}</p>
             </div>
           </div>
         </div>
@@ -426,28 +342,6 @@ const InviteMembers = ({ project, onBack, onLogout }) => {
                 <p className="text-gray-500 text-sm mt-2">You can add multiple emails separated by commas.</p>
               </div>
 
-              {/* Role Selection */}
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-3">Role</label>
-                <div className="grid grid-cols-2 gap-3">
-                  {roles.map((r) => (
-                    <button
-                      key={r.value}
-                      onClick={() => setRole(r.value)}
-                      className={`p-3 rounded-lg border-2 text-left transition-all ${
-                        role === r.value
-                          ? 'border-purple-500 bg-purple-50'
-                          : 'border-gray-200 hover:border-purple-200'
-                      }`}
-                    >
-                      <div className="text-2xl mb-1">{r.icon}</div>
-                      <div className="font-semibold text-gray-900">{r.label}</div>
-                      <div className="text-xs text-gray-600 mt-1">{r.description}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               {/* Action Buttons */}
               <div className="flex gap-3">
                 <button
@@ -482,7 +376,6 @@ const InviteMembers = ({ project, onBack, onLogout }) => {
                               {invite.status}
                             </span>
                             <span className="ml-2">
-                              Project: {invite.project?.name || 'Project'} • Role: {invite.role} • 
                               Sent: {new Date(invite.created_at).toLocaleDateString()}
                             </span>
                           </div>
@@ -513,19 +406,31 @@ const InviteMembers = ({ project, onBack, onLogout }) => {
             )}
           </div>
 
-          {/* Right Column - Roles & Permissions */}
+          {/* Right Column - Info */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Roles & Permissions</h2>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Member Permissions</h2>
             <div className="space-y-4">
-              {roles.map((role) => (
-                <div key={role.value} className="p-4 bg-gray-50 rounded-lg">
-                  <div className="flex items-center gap-3 mb-2">
-                    <span className="text-2xl">{role.icon}</span>
-                    <h3 className="font-semibold text-gray-900">{role.label}</h3>
-                  </div>
-                  <p className="text-gray-600 text-sm">{role.description}</p>
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-2xl">📝</span>
+                  <h3 className="font-semibold text-gray-900">Add Tickets</h3>
                 </div>
-              ))}
+                <p className="text-gray-600 text-sm">Members can create new tickets in this project.</p>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-2xl">🗑️</span>
+                  <h3 className="font-semibold text-gray-900">Delete Tickets</h3>
+                </div>
+                <p className="text-gray-600 text-sm">Members can delete tickets they created in this project.</p>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-2xl">👁️</span>
+                  <h3 className="font-semibold text-gray-900">View Only</h3>
+                </div>
+                <p className="text-gray-600 text-sm">Members can only view this project. No access to other projects.</p>
+              </div>
             </div>
           </div>
         </div>
