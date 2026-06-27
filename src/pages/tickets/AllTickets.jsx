@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
-import { supabase } from '../../services/supabase.js'
+import TicketComments from '../../components/TicketComments.jsx'
 import NotificationDropdown from "../../components/NotificationDropdown"
+import { supabase, notifyProjectMembers } from '../../services/supabase.js'
 
 const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId }) => {
   const [searchQuery, setSearchQuery] = useState('')
+  const [commentModal, setCommentModal] = useState({ show: false, ticket: null })
   const [statusFilter, setStatusFilter] = useState('All Status')
   const [priorityFilter, setPriorityFilter] = useState('All Priorities')
   const [typeFilter, setTypeFilter] = useState('All Types')
@@ -16,8 +18,17 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
     completed: 0
   })
   const [deleteModal, setDeleteModal] = useState({ show: false, ticket: null })
+  const [editModal, setEditModal] = useState({ show: false, ticket: null })
+  const [editForm, setEditForm] = useState({
+    title: '',
+    description: '',
+    status: 'To Do',
+    priority: 'Medium',
+    type: 'Task'
+  })
   const [currentUser, setCurrentUser] = useState(null)
   const [isOwner, setIsOwner] = useState(false)
+  const [updating, setUpdating] = useState(false)
 
   useEffect(() => {
     fetchCurrentUser()
@@ -29,8 +40,6 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
       const { data: { user } } = await supabase.auth.getUser()
       setCurrentUser(user)
 
-      // Check if user is owner of any project (simplified check)
-      // In a real app, you'd check if user is owner of the specific project
       if (user) {
         const { data: projects } = await supabase
           .from('projects')
@@ -101,7 +110,6 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
       if (error) throw error
 
       setTickets(tickets.filter(t => t.id !== ticketId))
-      // Recalculate stats
       const remaining = tickets.filter(t => t.id !== ticketId)
       setStats({
         total: remaining.length,
@@ -116,7 +124,72 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
     }
   }
 
-  // Check if current user is the owner of the ticket's project
+  const openEditModal = (ticket) => {
+    setEditForm({
+      title: ticket.title || '',
+      description: ticket.description || '',
+      status: ticket.status || 'To Do',
+      priority: ticket.priority || 'Medium',
+      type: ticket.type || 'Task'
+    })
+    setEditModal({ show: true, ticket })
+  }
+
+  const handleUpdateTicket = async (e) => {
+    e.preventDefault()
+    setUpdating(true)
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      const { error } = await supabase
+        .from('tickets')
+        .update({
+          title: editForm.title,
+          description: editForm.description,
+          status: editForm.status,
+          priority: editForm.priority,
+          type: editForm.type,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', editModal.ticket.id)
+
+      if (error) throw error
+
+      if (user) {
+        await notifyProjectMembers(
+          editModal.ticket.project_id,
+          `Ticket Status Updated`,
+          `"${editForm.title}" status changed to ${editForm.status}`,
+          'ticket_status',
+          user.id,
+          { ticket_id: editModal.ticket.id, new_status: editForm.status }
+        )
+      }
+
+      const updatedTickets = tickets.map(t => 
+        t.id === editModal.ticket.id 
+          ? { ...t, ...editForm, updated_at: new Date().toISOString() }
+          : t
+      )
+      setTickets(updatedTickets)
+
+      setStats({
+        total: updatedTickets.length,
+        open: updatedTickets.filter(t => t.status !== 'Done').length,
+        inProgress: updatedTickets.filter(t => t.status === 'In Progress').length,
+        completed: updatedTickets.filter(t => t.status === 'Done').length
+      })
+
+      setEditModal({ show: false, ticket: null })
+    } catch (error) {
+      console.error('Error updating ticket:', error)
+      alert('Failed to update ticket: ' + (error.message || 'Unknown error'))
+    } finally {
+      setUpdating(false)
+    }
+  }
+
   const isTicketOwner = (ticket) => {
     if (!currentUser || !ticket.projects) return false
     return ticket.projects.created_by === currentUser.id
@@ -193,22 +266,11 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
           </div>
         </div>
         <div className="flex items-center gap-4">
-  <NotificationDropdown />
-</div>
+          <NotificationDropdown />
+        </div>
       </header>
 
       <main className="p-6">
-
-        {/* Back Button */}
-        <button 
-          onClick={onBack}
-          className="flex items-center gap-2 text-purple-600 hover:text-purple-700 mb-6 transition font-medium"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-          </svg>
-          Back to Project
-        </button>
 
         {/* Header */}
         <div className="flex items-start justify-between mb-8">
@@ -318,17 +380,15 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
 
         {/* Tickets Table */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          {/* Table Header */}
           <div className="grid grid-cols-7 gap-4 px-6 py-4 border-b border-gray-100 text-xs font-medium text-gray-400 uppercase tracking-wider">
             <div className="col-span-2">Ticket</div>
             <div className="col-span-1">Status</div>
             <div className="col-span-1">Priority</div>
             <div className="col-span-1">Assignee</div>
             <div className="col-span-1">Project</div>
-            <div className="col-span-1">Updated</div>
+            <div className="col-span-1">Actions</div>
           </div>
 
-          {/* Table Rows */}
           <div className="divide-y divide-gray-50">
             {filteredTickets.length === 0 && (
               <div className="px-6 py-12 text-center">
@@ -345,7 +405,6 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
             )}
             {filteredTickets.map((ticket, i) => (
               <div key={ticket.id || i} className="grid grid-cols-7 gap-4 px-6 py-4 items-center hover:bg-gray-50 transition group">
-                {/* Ticket */}
                 <div 
                   className="col-span-2 flex items-center gap-3 cursor-pointer"
                   onClick={() => onViewTicket && onViewTicket(ticket.id)}
@@ -358,13 +417,11 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
                     <p className="text-xs text-gray-400">#{ticket.id?.toString().slice(0, 8)}</p>
                   </div>
                 </div>
-                {/* Status */}
                 <div className="col-span-1">
                   <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(ticket.status)}`}>
                     {ticket.status}
                   </span>
                 </div>
-                {/* Priority */}
                 <div className="col-span-1">
                   <span className={`px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1 ${getPriorityColor(ticket.priority)}`}>
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -373,36 +430,59 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
                     {ticket.priority}
                   </span>
                 </div>
-                {/* Assignee */}
                 <div className="col-span-1 flex items-center gap-2">
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-blue-400 flex items-center justify-center text-white text-xs font-bold">
                     {ticket.assignee?.charAt(0) || 'J'}
                   </div>
                   <span className="text-sm text-gray-600">{ticket.assignee || 'Unassigned'}</span>
                 </div>
-                {/* Project */}
                 <div className="col-span-1 text-sm text-gray-600">{ticket.projects?.name || 'Unknown'}</div>
-                {/* Updated + Delete */}
-                <div className="col-span-1 flex items-center justify-between">
-                  <span className="text-sm text-gray-500">
-                    {ticket.updated_at ? new Date(ticket.updated_at).toLocaleDateString() : 'Recently'}
-                  </span>
-                  {/* Delete Button - ONLY SHOW FOR PROJECT OWNERS */}
-                  {isTicketOwner(ticket) && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setDeleteModal({ show: true, ticket })
-                      }}
-                      className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition opacity-0 group-hover:opacity-100"
-                      title="Delete Ticket"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
+                {/* Actions */}
+<div className="col-span-1 flex items-center gap-2">
+  {/* Comments Button */}
+  <button
+    onClick={(e) => {
+      e.stopPropagation()
+      setCommentModal({ show: true, ticket })
+    }}
+    className="p-2 text-gray-400 hover:text-purple-500 hover:bg-purple-50 rounded-lg transition"
+    title="View Comments"
+  >
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+    </svg>
+  </button>
+
+  {/* Edit Button - Available for all users */}
+  <button
+    onClick={(e) => {
+      e.stopPropagation()
+      openEditModal(ticket)
+    }}
+    className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition"
+    title="Edit Ticket"
+  >
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+    </svg>
+  </button>
+
+  {/* Delete Button - ONLY for project owners */}
+  {isTicketOwner(ticket) && (
+    <button
+      onClick={(e) => {
+        e.stopPropagation()
+        setDeleteModal({ show: true, ticket })
+      }}
+      className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+      title="Delete Ticket"
+    >
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+      </svg>
+    </button>
+  )}
+</div>
               </div>
             ))}
           </div>
@@ -430,7 +510,109 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
 
       </main>
 
-      {/* Delete Confirmation Modal - ONLY FOR OWNERS */}
+      {/* Edit Ticket Modal */}
+      {editModal.show && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-gray-900">Edit Ticket</h3>
+              <button 
+                onClick={() => setEditModal({ show: false, ticket: null })}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateTicket} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Title</label>
+                <input
+                  type="text"
+                  value={editForm.title}
+                  onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                  required
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                <textarea
+                  value={editForm.description}
+                  onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                  rows={3}
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                  <select
+                    value={editForm.status}
+                    onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="To Do">To Do</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Review">Review</option>
+                    <option value="Done">Done</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Priority</label>
+                  <select
+                    value={editForm.priority}
+                    onChange={(e) => setEditForm({ ...editForm, priority: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="High">High</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Low">Low</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
+                <select
+                  value={editForm.type}
+                  onChange={(e) => setEditForm({ ...editForm, type: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="Bug">Bug</option>
+                  <option value="Feature">Feature</option>
+                  <option value="Task">Task</option>
+                  <option value="Improvement">Improvement</option>
+                </select>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setEditModal({ show: false, ticket: null })}
+                  className="flex-1 py-2.5 border border-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updating}
+                  className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 transition disabled:opacity-50"
+                >
+                  {updating ? 'Saving...' : 'Update Ticket'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
       {deleteModal.show && isTicketOwner(deleteModal.ticket) && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full mx-4">
@@ -465,6 +647,32 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
           </div>
         </div>
       )}
+
+      {/* ✅ Comment Modal - INSIDE the return! */}
+      {commentModal.show && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-gray-900">
+                Comments: {commentModal.ticket?.title}
+              </h3>
+              <button 
+                onClick={() => setCommentModal({ show: false, ticket: null })}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <TicketComments 
+              ticketId={commentModal.ticket?.id} 
+              currentUser={currentUser}
+            />
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }

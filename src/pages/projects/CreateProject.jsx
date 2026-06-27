@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { projectsApi } from '../../services/api.js'
 import NotificationDropdown from "../../components/NotificationDropdown"
+import { supabase, notifyUser } from '../../services/supabase.js'
 
 const Toast = ({ message, type, onClose }) => {
   const [progress, setProgress] = useState(100)
@@ -104,32 +105,44 @@ const CreateProject = ({ onBack, onLogout, previousView, onProjectCreated }) => 
   }
 
   const handleSubmit = async (e) => {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
+  e.preventDefault()
+  setLoading(true)
+  setError('')
 
-    try {
-      const project = await projectsApi.createProject(formData)
+  try {
+    const project = await projectsApi.createProject(formData)
 
-      // ✅ Show success toast
-      showToast(`Project "${formData.name}" created successfully! 🎉`, 'success')
-
-      // Clear form
-      setFormData({ name: '', description: '', status: 'Active' })
-
-      // Call callback after short delay so user sees toast
-      setTimeout(() => {
-        onProjectCreated && onProjectCreated(project?.id || project?.data?.id)
-      }, 1500)
-
-    } catch (err) {
-      setError(err.message || 'Failed to create project')
-      // ❌ Show error toast
-      showToast(err.message || 'Failed to create project', 'error')
-    } finally {
-      setLoading(false)
+    // ✅ Send notification to the creator
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      await notifyUser(
+        user.id,
+        project.id || project?.data?.id,
+        'Project Created 🎉',
+        `You created "${formData.name}" project successfully!`,
+        'project',
+        { project_id: project.id }
+      )
     }
+
+    // ✅ Show success toast
+    showToast(`Project "${formData.name}" created successfully! 🎉`, 'success')
+
+    // Clear form
+    setFormData({ name: '', description: '', status: 'Active' })
+
+    // Call callback after short delay so user sees toast
+    setTimeout(() => {
+      onProjectCreated && onProjectCreated(project?.id || project?.data?.id)
+    }, 1500)
+
+  } catch (err) {
+    setError(err.message || 'Failed to create project')
+    showToast(err.message || 'Failed to create project', 'error')
+  } finally {
+    setLoading(false)
   }
+}
 
   const handleChange = (e) => {
     setFormData(prev => ({

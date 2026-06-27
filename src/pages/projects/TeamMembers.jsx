@@ -348,13 +348,7 @@ const TeamMembers = ({ project, onBack, onLogout, onInviteMembers }) => {
       </header>
 
       <main className="p-6 w-full">
-        <button onClick={onBack} className="flex items-center gap-2 text-purple-600 hover:text-purple-700 mb-6 transition font-medium">
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-          </svg>
-          Back to Project
-        </button>
-
+        
         <div className="flex items-start justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Team Members</h1>

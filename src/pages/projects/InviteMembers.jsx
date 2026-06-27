@@ -67,38 +67,38 @@ const InviteMembers = ({ project, onBack, onLogout }) => {
     return `${window.location.origin}/accept-invitation/${token}`;
   };
 
-  const createNotification = async (userId, title, message) => {
-    try {
-      if (!userId) {
-        console.log('No userId provided, skipping notification');
-        return;
-      }
-
-      const notificationData = {
-        user_id: userId,
-        type: 'invitation',
-        title: title || 'Invitation Sent',
-        message: message || '',
-        data: { project_id: project?.id || selectedProjectId },
-        read: false,
-        created_at: new Date().toISOString()
-      };
-
-      console.log('Creating notification:', notificationData);
-
-      const { error } = await supabase
-        .from('notifications')
-        .insert(notificationData);
-
-      if (error) {
-        console.error('Notification creation error:', error);
-        // Don't throw - notifications are not critical
-      }
-    } catch (err) {
-      console.error('Failed to create notification:', err);
-      // Don't throw - notifications are not critical
+  // Replace the existing createNotification function with this:
+const createNotification = async (userId, title, message) => {
+  try {
+    if (!userId) {
+      console.log('No userId provided, skipping notification');
+      return;
     }
-  };
+
+    const projectId = project?.id || selectedProjectId;
+    
+    const notificationData = {
+      user_id: userId,
+      project_id: projectId,
+      type: 'invitation',
+      title: title || 'Invitation Sent',
+      message: message || '',
+      data: { project_id: projectId },
+      read: false,
+      created_at: new Date().toISOString()
+    };
+
+    const { error } = await supabase
+      .from('notifications')
+      .insert(notificationData);
+
+    if (error) {
+      console.error('Notification creation error:', error);
+    }
+  } catch (err) {
+    console.error('Failed to create notification:', err);
+  }
+};
 
   const handleSendInvites = async () => {
     setLoading(true);

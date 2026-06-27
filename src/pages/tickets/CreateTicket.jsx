@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import NotificationDropdown from "../../components/NotificationDropdown"
-import { supabase } from '../../services/supabase.js'
+import { supabase, notifyProjectMembers } from '../../services/supabase.js'
 
 const CreateTicket = ({ onBack, onLogout, projects = [] }) => {
   const [project, setProject] = useState('')
@@ -77,38 +77,49 @@ const CreateTicket = ({ onBack, onLogout, projects = [] }) => {
   ]
 
   const handleCreateTicket = async () => {
-    if (!title.trim() || !description.trim()) return
+  if (!title.trim() || !description.trim()) return
 
-    setIsSubmitting(true)
+  setIsSubmitting(true)
 
-    try {
-      const { data, error } = await supabase
-        .from('tickets')
-        .insert([{
-          project_id: project,
-          title: title,
-          description: description,
-          priority: priority.charAt(0).toUpperCase() + priority.slice(1),
-          status: status,
-          type: type.charAt(0).toUpperCase() + type.slice(1),
-          // assignee removed - column does not exist in table
-        }])
-        .select()
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    const { data, error } = await supabase
+      .from('tickets')
+      .insert([{
+        project_id: project,
+        title: title,
+        description: description,
+        priority: priority.charAt(0).toUpperCase() + priority.slice(1),
+        status: status,
+        type: type.charAt(0).toUpperCase() + type.slice(1),
+        created_by: user?.id
+      }])
+      .select()
 
-      if (error) throw error
+    if (error) throw error
 
-      console.log('Ticket created:', data)
-      onBack()
-    } catch (err) {
-      console.error('Error creating ticket:', err)
-      console.error('Error message:', err.message)
-      console.error('Error code:', err.code)
-      console.error('Error details:', err.details)
-      alert('Failed to create ticket: ' + (err.message || 'Unknown error'))
-    } finally {
-      setIsSubmitting(false)
+    // ✅ Send notification to all project members
+    if (user && data && data.length > 0) {
+      await notifyProjectMembers(
+        project,
+        `New Ticket: ${title}`,
+        `${user.email || 'Someone'} created a new ticket: "${title}"`,
+        'ticket',
+        user.id,
+        { ticket_id: data[0].id }
+      )
     }
+
+    console.log('Ticket created:', data)
+    onBack()
+  } catch (err) {
+    console.error('Error creating ticket:', err)
+    alert('Failed to create ticket: ' + (err.message || 'Unknown error'))
+  } finally {
+    setIsSubmitting(false)
   }
+}
 
   if (loading) {
     return (

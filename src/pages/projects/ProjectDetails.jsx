@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { supabase } from '../../services/supabase.js'
 import NotificationDropdown from "../../components/NotificationDropdown"
+import { supabase, notifyProjectMembers } from '../../services/supabase.js'
 
 const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers, onViewAllTickets }) => {
   const [project, setProject] = useState(null)
@@ -11,28 +11,17 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
   const [editForm, setEditForm] = useState({ name: '', description: '', status: 'Active' })
   const [updating, setUpdating] = useState(false)
 
-  
-
-  
-
-  
-
   useEffect(() => {
     if (projectId) {
       fetchProjectData()
     }
   }, [projectId])
-  
-  // Prevent infinite recursion by ensuring fetchProjectData doesn't cause re-renders
-  // that trigger the useEffect again. The dependency array only includes projectId,
-  // and we don't set any state that would change projectId during fetch.
 
   const fetchProjectData = async () => {
     try {
       setLoading(true)
       setError('')
 
-      // Fetch project details
       const { data: projectData, error: projectError } = await supabase
         .from('projects')
         .select('*')
@@ -42,7 +31,6 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
       if (projectError) throw projectError
       setProject(projectData)
 
-      // Fetch tickets for this project
       const { data: ticketsData, error: ticketsError } = await supabase
         .from('tickets')
         .select('*')
@@ -66,7 +54,8 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
     setUpdating(true)
     setError('')
     try {
-      // Use RPC to bypass RLS/trigger issues
+      const { data: { user } } = await supabase.auth.getUser()
+      
       const { data, error } = await supabase
         .rpc('update_project', {
           p_id: projectId,
@@ -76,8 +65,6 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
         })
 
       if (error) {
-        console.error('RPC error:', error)
-        // Fallback: try direct update
         const { error: updateError } = await supabase
           .from('projects')
           .update({
@@ -90,7 +77,16 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
         if (updateError) throw updateError
       }
 
-      // Update local state
+      if (user) {
+        await notifyProjectMembers(
+          projectId,
+          `Project Updated`,
+          `"${editForm.name}" project details were updated`,
+          'project',
+          user.id
+        )
+      }
+
       setProject({ ...project, ...editForm })
       setEditModal({ show: false, project: null })
     } catch (err) {
@@ -178,7 +174,6 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
 
   const currentProject = project
 
-  // Calculate stats from real tickets
   const stats = {
     totalTickets: tickets.length,
     openTickets: tickets.filter(t => t.status !== 'Done').length,
@@ -186,7 +181,6 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
     inProgress: tickets.filter(t => t.status === 'In Progress').length
   }
 
-  // Calculate progress from real tickets
   const progress = {
     overall: tickets.length > 0 ? Math.round((tickets.filter(t => t.status === 'Done').length / tickets.length) * 100) : 0,
     todo: tickets.filter(t => t.status === 'To Do').length,
@@ -219,12 +213,12 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
           </div>
         </div>
         <div className="flex items-center gap-4">
-  <NotificationDropdown />
-</div>
+          <NotificationDropdown />
+        </div>
       </header>
 
       <div>
-  <main className="p-6">
+        <main className="p-6">
 
           {/* Back Button */}
           <button 
@@ -237,7 +231,6 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
             <span className="font-medium">Back to Projects</span>
           </button>
 
-          {/* Error Message - Only show if it's not the recursion error */}
           {error && !error.includes('infinite recursion') && (
             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
               Error: {error}
@@ -306,8 +299,6 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
             </div>
           </div>
 
-
-
           <div className="flex gap-6">
             {/* Main Content Area */}
             <div className="flex-1">
@@ -345,7 +336,6 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
                 <h3 className="text-lg font-bold text-gray-900 mb-6">Progress Overview</h3>
                 <div className="flex items-center gap-8">
-                  {/* Donut Chart */}
                   <div className="relative w-40 h-40">
                     <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
                       <circle cx="50" cy="50" r="40" fill="none" stroke="#e5e7eb" strokeWidth="10" />
@@ -357,7 +347,6 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
                     </div>
                   </div>
 
-                  {/* Status Breakdown */}
                   <div className="flex-1 space-y-3">
                     {[
                       { label: 'To Do', value: progress.todo, color: 'bg-purple-500' },
@@ -381,19 +370,19 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
                 </div>
               </div>
 
-              {/* Recent Tickets */}
+              {/* Recent Tickets - With Comments Button */}
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="text-lg font-bold text-gray-900">Recent Tickets</h3>
                   <button 
-  onClick={onViewAllTickets}
-  className="text-sm font-medium text-purple-600 flex items-center gap-1 hover:underline"
->
-  View All Tickets
-  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-  </svg>
-</button>
+                    onClick={onViewAllTickets}
+                    className="text-sm font-medium text-purple-600 flex items-center gap-1 hover:underline"
+                  >
+                    View All Tickets
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                    </svg>
+                  </button>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full">
@@ -404,7 +393,7 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
                         <th className="pb-3 font-medium">Priority</th>
                         <th className="pb-3 font-medium">Assignee</th>
                         <th className="pb-3 font-medium">Updated</th>
-                        <th className="pb-3 font-medium"></th>
+                        <th className="pb-3 font-medium">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -439,13 +428,29 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
                               {ticket.assignee?.full_name?.charAt(0) || ticket.assignee?.charAt(0) || 'J'}
                             </div>
                           </td>
-                          <td className="py-4 text-sm text-gray-500">{ticket.updated || (ticket.updated_at ? new Date(ticket.updated_at).toLocaleDateString() : 'Recently')}</td>
+                          <td className="py-4 text-sm text-gray-500">
+                            {ticket.updated || (ticket.updated_at ? new Date(ticket.updated_at).toLocaleDateString() : 'Recently')}
+                          </td>
+                          {/* ✅ ACTIONS COLUMN - Comments Button + Three dots */}
                           <td className="py-4">
-                            <button className="p-2 hover:bg-gray-100 rounded-lg">
-                              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-                              </svg>
-                            </button>
+                            <div className="flex items-center gap-1">
+                              {/* Comments Button */}
+                              <button
+                                onClick={() => onViewAllTickets && onViewAllTickets()}
+                                className="p-2 hover:bg-gray-100 rounded-lg text-purple-500"
+                                title="View Comments"
+                              >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                </svg>
+                              </button>
+                              {/* Three dots menu */}
+                              <button className="p-2 hover:bg-gray-100 rounded-lg">
+                                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                                </svg>
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -488,14 +493,14 @@ const ProjectDetails = ({ projectId, onBack, onInviteMembers, onViewTeamMembers,
                   )}
                 </div>
                 <button 
-  onClick={onViewTeamMembers}
-  className="w-full mt-4 py-2.5 border border-purple-200 text-purple-600 rounded-xl font-medium hover:bg-purple-50 transition flex items-center justify-center gap-2"
->
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-  </svg>
-  All Members
-</button>
+                  onClick={onViewTeamMembers}
+                  className="w-full mt-4 py-2.5 border border-purple-200 text-purple-600 rounded-xl font-medium hover:bg-purple-50 transition flex items-center justify-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                  </svg>
+                  All Members
+                </button>
               </div>
 
               {/* Project Activity */}
