@@ -1,564 +1,537 @@
-import { useState, useEffect } from 'react'
-import { supabase } from '../../services/supabase.js'
-import { sendInvitationEmail, isEmailJSConfigured } from '../../services/emailjsService.js'
-import NotificationDropdown from "../../components/NotificationDropdown"
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../../services/supabase.js';
+import { sendInvitationEmail, isEmailJSConfigured } from '../../services/emailjsService.js';
+import { useNavigate } from 'react-router-dom';
 
 const InviteMembers = ({ project, onBack, onLogout }) => {
-  const [emails, setEmails] = useState('')
-  const [selectedRole, setSelectedRole] = useState('')
-  const [copied, setCopied] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [success, setSuccess] = useState('')
-  const [error, setError] = useState('')
-  const [invitations, setInvitations] = useState([])
-  const [projects, setProjects] = useState([])
-  const [selectedProject, setSelectedProject] = useState('')
-  const [copiedLink, setCopiedLink] = useState('')
-  const [emailResults, setEmailResults] = useState([])
-  const [showLinks, setShowLinks] = useState(false)
+  const navigate = useNavigate();
+  const [emails, setEmails] = useState('');
+  const [role, setRole] = useState('member');  // Changed default to 'member' - most common default
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState('');
+  const [error, setError] = useState('');
+  const [invitations, setInvitations] = useState([]);
+  const [emailResults, setEmailResults] = useState([]);
+  const [showLinks, setShowLinks] = useState(false);
+  const [currentProject, setCurrentProject] = useState(project || {});
+  const [projects, setProjects] = useState([]);
+  const [selectedProjectId, setSelectedProjectId] = useState(project?.id || '');
+  const [dbRoles, setDbRoles] = useState([]); // Store valid roles from DB
 
-  const roles = [
-    { 
-      id: 'Admin', 
-      label: 'Admin', 
-      description: 'Full access to project settings, members and tickets.',
-      icon: '👑',
-      color: 'bg-purple-100 text-purple-600'
-    },
-    { 
-      id: 'Developer', 
-      label: 'Developer', 
-      description: 'Manage tickets and project activities.',
-      icon: '⚙️',
-      color: 'bg-blue-100 text-blue-600'
-    },
-    { 
-      id: 'Designer', 
-      label: 'Designer', 
-      description: 'View and manage assigned tickets.',
-      icon: '👤',
-      color: 'bg-teal-100 text-teal-600'
-    },
-    { 
-      id: 'QA', 
-      label: 'QA Engineer', 
-      description: 'View project and tickets (read-only).',
-      icon: '👁️',
-      color: 'bg-yellow-100 text-yellow-600'
-    }
-  ]
+  // Default roles - will be overridden if DB has different constraints
+  const defaultRoles = [
+    { value: 'admin', label: 'Admin', description: 'Full access to all project settings, members, and tickets.', icon: '👑' },
+    { value: 'member', label: 'Member', description: 'Standard project member access.', icon: '👤' },
+    { value: 'developer', label: 'Developer', description: 'Can create and manage tickets, view project details.', icon: '💻' },
+    { value: 'designer', label: 'Designer', description: 'Can view and comment on tickets, upload design assets.', icon: '🎨' },
+    { value: 'qa', label: 'QA', description: 'Can create bug reports, test tickets, and add comments.', icon: '🧪' }
+  ];
 
   useEffect(() => {
-    fetchProjects()
-    fetchInvitations()
-  }, [])
-
-  useEffect(() => {
-    if (project?.id) {
-      setSelectedProject(project.id)
+    if (!project?.id) {
+      fetchProjects();
     }
-  }, [project])
+    fetchInvitations();
+    fetchValidRoles(); // Check what roles the DB actually accepts
+  }, [project]);
+
+  // Fetch valid roles from database check constraint
+  const fetchValidRoles = async () => {
+    try {
+      // Try to get the constraint info by testing inserts
+      const testRoles = ['admin', 'member', 'developer', 'viewer', 'owner', 'user'];
+      const validRoles = [];
+
+      for (const testRole of testRoles) {
+        try {
+          // Try a test insert (will rollback)
+          const { error } = await supabase
+            .from('invitations')
+            .insert({
+              project_id: selectedProjectId || '00000000-0000-0000-0000-000000000000',
+              email: 'test@example.com',
+              role: testRole,
+              invited_by: '00000000-0000-0000-0000-000000000000',
+              status: 'pending',
+              token: 'test-token'
+            });
+
+          if (!error || !error.message.includes('check constraint')) {
+            validRoles.push(testRole);
+          }
+        } catch (e) {
+          // Ignore
+        }
+      }
+
+      console.log('Valid DB roles detected:', validRoles);
+      if (validRoles.length > 0) {
+        setDbRoles(validRoles);
+      }
+    } catch (err) {
+      console.log('Could not detect valid roles, using defaults');
+    }
+  };
 
   const fetchProjects = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) return;
 
       const { data, error } = await supabase
         .from('projects')
-        .select('id, name')
-        .eq('created_by', user.id)
+        .select('*')
+        .eq('created_by', userData.user.id)
+        .order('created_at', { ascending: false });
 
-      if (error) throw error
-      setProjects(data || [])
-      if (data && data.length > 0 && !selectedProject && !project?.id) {
-        setSelectedProject(data[0].id)
+      if (error) throw error;
+      setProjects(data || []);
+      if (data && data.length > 0 && !selectedProjectId) {
+        setSelectedProjectId(data[0].id);
+        setCurrentProject(data[0]);
       }
     } catch (err) {
-      console.error('Error fetching projects:', err)
+      console.error('Error fetching projects:', err);
     }
-  }
+  };
 
   const fetchInvitations = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      const projectId = project?.id || selectedProjectId;
+      if (!projectId) return;
 
       const { data, error } = await supabase
         .from('invitations')
-        .select(`
-          *,
-          project:project_id (name)
-        `)
-        .eq('invited_by', user.id)
-        .order('created_at', { ascending: false })
+        .select('*')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: false });
 
-      if (error) throw error
-      setInvitations(data || [])
+      if (error) throw error;
+      setInvitations(data || []);
     } catch (err) {
-      console.error('Error fetching invitations:', err)
+      console.error('Error fetching invitations:', err);
     }
-  }
-
-  const currentProject = project || projects.find(p => p.id === selectedProject) || {
-    name: 'Nudge Platform',
-    status: 'Active',
-    icon: '📦'
-  }
+  };
 
   const getInviteLink = (token) => {
-    return `${window.location.origin}/accept-invite?token=${token}`
-  }
-
-  const handleCopyLink = (link) => {
-    navigator.clipboard.writeText(link)
-    setCopiedLink(link)
-    setCopied(true)
-    setTimeout(() => {
-      setCopied(false)
-      setCopiedLink('')
-    }, 2000)
-  }
+    return `${window.location.origin}/accept-invitation/${token}`;
+  };
 
   const handleSendInvites = async () => {
-    if (!emails.trim() || !selectedRole || !selectedProject) {
-      setError('Please fill in all fields')
-      return
-    }
-
-    setIsSubmitting(true)
-    setError('')
-    setSuccess('')
-    setEmailResults([])
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    setEmailResults([]);
+    setShowLinks(false);
 
     try {
-      const emailList = emails.split(',').map(e => e.trim()).filter(e => e)
-      const { data: { user } } = await supabase.auth.getUser()
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) throw new Error('You must be logged in to send invitations');
 
-      if (!user) {
-        setError('You must be logged in')
-        return
+      const projectId = project?.id || selectedProjectId;
+      if (!projectId) throw new Error('Please select a project first');
+
+      const emailList = emails.split(',').map(e => e.trim()).filter(e => e);
+      if (emailList.length === 0) throw new Error('Please enter at least one email address');
+
+      // Get current user's profile
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', userData.user.id)
+        .single();
+
+      const senderName = profileData?.full_name || userData.user.email;
+
+      // Determine valid role - try to match DB constraint
+      // Common valid values: 'admin', 'member', 'viewer', 'owner'
+      let validRole = role;
+
+      // If we detected DB roles, use the first matching one
+      if (dbRoles.length > 0 && !dbRoles.includes(role)) {
+        validRole = dbRoles[0]; // Use first valid role as fallback
+        console.log(`Role '${role}' not valid, using '${validRole}' instead`);
       }
 
-      // Get project name
-      const { data: projectData } = await supabase
-        .from('projects')
-        .select('name')
-        .eq('id', selectedProject)
-        .single()
+      // If still not sure, try 'member' as safest default
+      if (!validRole) validRole = 'member';
 
-      const projectName = projectData?.name || 'Project'
+      console.log('Using role:', validRole);
 
-      // Get sender name
-      const { data: userData } = await supabase.auth.getUser()
-      const senderName = userData?.user?.user_metadata?.full_name || 'Nudge Team'
-
-      // Generate unique tokens for each invitation
+      // Generate invitation data
       const invitationsData = emailList.map(email => ({
-        project_id: selectedProject,
-        email: email.toLowerCase(),
-        role: selectedRole,
-        invited_by: user.id,
+        project_id: projectId,
+        email: email,
+        role: validRole,
+        invited_by: userData.user.id,
+        status: 'pending',
         token: crypto.randomUUID(),
-        status: 'pending'
-      }))
+        created_at: new Date().toISOString()
+      }));
 
-      // Save invitations to database
+      console.log('Creating invitations:', invitationsData);
+
+      // Try to insert
       const { data: savedInvites, error: dbError } = await supabase
         .from('invitations')
         .insert(invitationsData)
-        .select()
+        .select();
 
-      if (dbError) throw dbError
+      console.log('DB Insert Result:', savedInvites);
+      console.log('DB Insert Error:', dbError);
 
-      // Send emails via EmailJS
-      const emailSendResults = []
-      const linksForDisplay = []
+      if (dbError) {
+        console.error('Database error details:', dbError);
 
+        // If constraint error, show helpful message
+        if (dbError.message.includes('check constraint')) {
+          throw new Error(`Invalid role: '${role}'. The database only accepts specific role values. Please check your database schema or use a different role.`);
+        }
+
+        throw new Error(`Database error: ${dbError.message}`);
+      }
+
+      if (!savedInvites || savedInvites.length === 0) {
+        throw new Error('No invitations were saved to the database');
+      }
+
+      // Refresh invitations list
+      await fetchInvitations();
+
+      // Send emails
+      const results = [];
       for (const invite of savedInvites) {
-        const inviteLink = getInviteLink(invite.token)
+        const inviteLink = getInviteLink(invite.token);
 
-        linksForDisplay.push({
-          email: invite.email,
-          link: inviteLink,
-          token: invite.token
-        })
+        if (isEmailJSConfigured()) {
+          try {
+            await sendInvitationEmail({
+              to_email: invite.email,
+              to_name: invite.email.split('@')[0],
+              project_name: currentProject.name || 'Project',
+              role: roles.find(r => r.value === role)?.label || role,
+              invite_link: inviteLink,
+              sender_name: senderName
+            });
+            results.push({ email: invite.email, success: true });
+          } catch (emailError) {
+            console.error('Email error:', emailError);
+            results.push({ email: invite.email, success: false, error: emailError.message });
+          }
+        } else {
+          results.push({ email: invite.email, success: false, error: 'EmailJS not configured' });
+        }
+      }
 
-        // Try to send email via EmailJS
-        const emailResult = await sendInvitationEmail({
+      setEmailResults(results);
+      setShowLinks(true);
+
+      const successCount = results.filter(r => r.success).length;
+      if (successCount > 0) {
+        setSuccess(`Successfully sent ${successCount} invitation${successCount > 1 ? 's' : ''}!`);
+      } else {
+        setSuccess(`Invitations created! ${results.length} link(s) generated for manual sharing.`);
+      }
+
+      setEmails('');
+    } catch (err) {
+      console.error('Full error:', err);
+      setError(err.message || 'Failed to send invitations');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResend = async (invite) => {
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', userData.user.id)
+        .single();
+
+      const senderName = profileData?.full_name || userData.user.email;
+      const inviteLink = getInviteLink(invite.token);
+
+      if (isEmailJSConfigured()) {
+        await sendInvitationEmail({
           to_email: invite.email,
           to_name: invite.email.split('@')[0],
-          project_name: projectName,
-          role: invite.role,
+          project_name: currentProject.name || 'Project',
+          role: roles.find(r => r.value === invite.role)?.label || invite.role,
           invite_link: inviteLink,
           sender_name: senderName
-        })
-
-        emailSendResults.push({
-          email: invite.email,
-          ...emailResult
-        })
-      }
-
-      setEmailResults(emailSendResults)
-      setShowLinks(true)
-
-      const successfulEmails = emailSendResults.filter(r => r.success).length
-      const failedEmails = emailSendResults.filter(r => !r.success)
-
-      if (successfulEmails > 0) {
-        setSuccess(`✅ ${successfulEmails} invitation email(s) sent successfully!`)
-      } else if (!isEmailJSConfigured()) {
-        setSuccess(`✅ Invitations created! EmailJS not configured - copy links below to share manually.`)
+        });
+        setSuccess(`Invitation resent to ${invite.email}!`);
       } else {
-        setError('Failed to send emails. Invitations saved but emails not delivered.')
+        setSuccess(`Copy this link: ${inviteLink}`);
       }
-
-      if (failedEmails.length > 0) {
-        console.warn('Failed emails:', failedEmails)
-      }
-
-      setEmails('')
-      setSelectedRole('')
-      fetchInvitations()
     } catch (err) {
-      console.error('Error sending invitations:', err)
-      setError(err.message || 'Failed to send invitations. Please try again.')
-    } finally {
-      setIsSubmitting(false)
+      setError(`Failed to resend: ${err.message}`);
     }
-  }
+  };
 
-  const handleCancelInvite = async (inviteId) => {
+  const handleRevoke = async (inviteId) => {
     try {
       const { error } = await supabase
         .from('invitations')
         .delete()
-        .eq('id', inviteId)
+        .eq('id', inviteId);
 
-      if (error) throw error
-      fetchInvitations()
+      if (error) throw error;
+
+      await fetchInvitations();
+      setSuccess('Invitation revoked successfully');
     } catch (err) {
-      console.error('Error canceling invitation:', err)
+      setError(`Failed to revoke: ${err.message}`);
     }
-  }
+  };
 
-  const getStatusColor = (status) => {
-    switch (status?.toLowerCase()) {
-      case 'active': return 'bg-green-100 text-green-700'
-      case 'pending': return 'bg-yellow-100 text-yellow-700'
-      case 'accepted': return 'bg-green-100 text-green-700'
-      case 'expired': return 'bg-gray-100 text-gray-700'
-      default: return 'bg-gray-100 text-gray-700'
-    }
-  }
+  // Use DB roles if detected, otherwise use defaults
+  const roles = dbRoles.length > 0 
+    ? dbRoles.map(r => ({ 
+        value: r, 
+        label: r.charAt(0).toUpperCase() + r.slice(1), 
+        description: `Role: ${r}`,
+        icon: '👤'
+      }))
+    : defaultRoles;
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Back Button */}
+        <button onClick={onBack || (() => navigate(-1))} className="mb-6 flex items-center text-gray-600 hover:text-gray-900 transition-colors">
+          <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          Back
+        </button>
 
-      {/* Top Navbar */}
-      <header className="bg-white border-b border-gray-100 px-6 py-3 flex items-center justify-between sticky top-0 z-20">
-        <div className="flex items-center gap-4">
-          <button className="p-2 hover:bg-gray-100 rounded-lg lg:hidden">
-            <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
-          <div className="relative hidden md:block">
-            <svg className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input 
-              type="text" 
-              placeholder="Search projects, tickets..." 
-              className="pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm w-80 focus:outline-none focus:ring-2 focus:ring-purple-500"
-            />
-          </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <NotificationDropdown />
-        </div>
-      </header>
-
-      <div>
-        <main className="p-6">
-
-          {/* Back Button */}
-          <button 
-            onClick={onBack}
-            className="flex items-center gap-2 text-purple-600 hover:text-purple-700 mb-6 transition font-medium"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            Back to All Members
-          </button>
-
-          {/* Header */}
-          <div className="flex items-start gap-4 mb-8">
-            <div className="w-14 h-14 rounded-2xl bg-purple-600 flex items-center justify-center text-white text-2xl">
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center text-xl">
               {currentProject.icon}
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 mb-1">Invite Members</h1>
-              <p className="text-gray-500">Add new members to {currentProject.name} and give them access to this project.</p>
+              <h1 className="text-2xl font-bold text-gray-900">Invite Members</h1>
+              <p className="text-gray-600">Add new members to {currentProject.name} and give them access to this project.</p>
             </div>
           </div>
+        </div>
 
-          {/* Project Selector */}
-          {!project?.id && (
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Select Project</label>
-              <select
-                value={selectedProject}
-                onChange={(e) => setSelectedProject(e.target.value)}
-                className="w-full max-w-md px-4 py-3 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-              >
-                <option value="">Select a project</option>
-                {projects.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* Project Badge */}
-          <div className="flex items-center gap-3 mb-8">
-            <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-xl border border-gray-200">
-              <span className="w-2 h-2 rounded-full bg-purple-500"></span>
-              <span className="font-medium text-gray-900">{currentProject.name}</span>
-            </div>
-            <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(currentProject.status)}`}>
-              ● {currentProject.status || 'Active'}
-            </span>
-          </div>
-
-          {/* EmailJS Config Warning */}
-          {!isEmailJSConfigured() && (
-            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-xl text-yellow-700 text-sm">
-              <p className="font-medium">⚠️ EmailJS Not Configured</p>
-              <p className="mt-1">Invitation links will be generated but emails won't be sent automatically. You'll need to copy and share the links manually.</p>
-              <p className="mt-2 text-xs">To enable email sending, update your credentials in <code>src/services/emailjsService.js</code></p>
-            </div>
-          )}
-
-          {/* Success/Error Messages */}
-          {success && (
-            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl text-green-700 text-sm">
-              {success}
-            </div>
-          )}
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
-              {error}
-            </div>
-          )}
-
-          {/* Email Results */}
-          {emailResults.length > 0 && (
-            <div className="mb-6 bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">Email Delivery Status</h3>
-              <div className="space-y-2">
-                {emailResults.map((result, idx) => (
-                  <div key={idx} className={`flex items-center gap-3 p-3 rounded-lg ${result.success ? 'bg-green-50' : 'bg-red-50'}`}>
-                    <span className={`w-2 h-2 rounded-full ${result.success ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                    <span className="text-sm font-medium">{result.email}</span>
-                    <span className={`text-sm ${result.success ? 'text-green-600' : 'text-red-600'}`}>
-                      {result.success ? '✓ Sent' : `✗ ${result.error}`}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Invitation Links (shown after creation) */}
-          {showLinks && emailResults.some(r => !r.success) && (
-            <div className="mb-6 bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">Copy & Share These Links</h3>
-              <p className="text-sm text-gray-500 mb-4">Share these links with your team members:</p>
-              <div className="space-y-3">
-                {emailResults.filter(r => !r.success).map((result, idx) => {
-                  const invite = invitations.find(i => i.email === result.email && i.status === 'pending')
-                  const link = invite ? getInviteLink(invite.token) : ''
-                  return (
-                    <div key={idx} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
-                      <span className="text-sm font-medium text-gray-700 min-w-[180px]">{result.email}</span>
-                      <input 
-                        type="text" 
-                        value={link} 
-                        readOnly 
-                        className="flex-1 text-xs bg-white px-3 py-2 rounded-lg border border-gray-200"
-                      />
-                      <button
-                        onClick={() => handleCopyLink(link)}
-                        className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg text-sm font-medium hover:bg-purple-200 transition"
-                      >
-                        {copiedLink === link ? 'Copied!' : 'Copy'}
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          <div className="flex gap-6">
-            {/* Left Column - Invite Form */}
-            <div className="flex-1">
-
-              {/* Invite by Email */}
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-2">Invite by Email</h3>
-                <p className="text-gray-500 text-sm mb-4">
-                  {isEmailJSConfigured() 
-                    ? 'Enter email addresses to send invitation emails automatically.' 
-                    : 'Enter email addresses to generate invitation links.'}
+        {/* EmailJS Config Warning */}
+        {!isEmailJSConfigured() && (
+          <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="flex items-start gap-3">
+              <span className="text-yellow-600 text-xl">⚠️</span>
+              <div>
+                <h3 className="font-semibold text-yellow-800">EmailJS Not Configured</h3>
+                <p className="text-yellow-700 text-sm mt-1">
+                  Invitation links will be generated but emails won't be sent automatically. You'll need to copy and share the links manually.
                 </p>
+              </div>
+            </div>
+          </div>
+        )}
 
-                <div className="relative mb-2">
-                  <svg className="w-5 h-5 text-gray-400 absolute left-4 top-1/2 transform -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                  </svg>
-                  <input
-                    type="text"
+        {/* Success/Error Messages */}
+        {success && (
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg text-green-800">
+            {success}
+          </div>
+        )}
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800">
+            {error}
+          </div>
+        )}
+
+        {/* Email Results */}
+        {emailResults.length > 0 && (
+          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <h3 className="font-semibold text-blue-800 mb-2">Email Delivery Status</h3>
+            {emailResults.map((result, idx) => (
+              <div key={idx} className="flex items-center justify-between py-2 border-b border-blue-100 last:border-0">
+                <span className="text-blue-900">{result.email}</span>
+                <span className={result.success ? 'text-green-600' : 'text-red-600'}>
+                  {result.success ? '✓ Sent' : `✗ ${result.error}`}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Invitation Links */}
+        {showLinks && emailResults.some(r => !r.success) && (
+          <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+            <h3 className="font-semibold text-purple-800 mb-2">Copy & Share These Links</h3>
+            <p className="text-purple-600 text-sm mb-3">Share these links with your team members:</p>
+            {emailResults.filter(r => !r.success).map((result, idx) => {
+              const invite = invitations.find(i => i.email === result.email && i.status === 'pending');
+              const link = invite ? getInviteLink(invite.token) : '';
+              return (
+                <div key={idx} className="mb-2">
+                  <div className="text-sm text-purple-900 mb-1">{result.email}</div>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="text" 
+                      value={link} 
+                      readOnly 
+                      className="flex-1 p-2 bg-white border border-purple-200 rounded text-sm text-purple-800"
+                    />
+                    <button 
+                      onClick={() => navigator.clipboard.writeText(link)}
+                      className="px-3 py-2 bg-purple-600 text-white rounded text-sm hover:bg-purple-700"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Left Column - Invite Form */}
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Invite by Email</h2>
+              <p className="text-gray-600 text-sm mb-4">
+                {isEmailJSConfigured() 
+                  ? 'Enter email addresses to send invitation emails automatically.' 
+                  : 'Enter email addresses to generate invitation links.'}
+              </p>
+
+              {/* Email Input */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email Addresses</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <textarea
                     value={emails}
                     onChange={(e) => setEmails(e.target.value)}
                     placeholder="Enter email addresses"
                     className="w-full pl-12 pr-4 py-3 bg-white border border-gray-200 rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    rows={3}
                   />
                 </div>
-                <p className="text-xs text-gray-500 mb-6">You can add multiple emails separated by commas.</p>
+                <p className="text-gray-500 text-sm mt-2">You can add multiple emails separated by commas.</p>
+              </div>
 
-                {/* Role Selection */}
-                <div className="mb-4">
-                  <h4 className="text-sm font-medium text-gray-900 mb-2">Role</h4>
-                  <div className="relative">
-                    <svg className="w-5 h-5 text-gray-400 absolute left-4 top-1/2 transform -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                    </svg>
-                    <select
-                      value={selectedRole}
-                      onChange={(e) => setSelectedRole(e.target.value)}
-                      className="w-full pl-12 pr-4 py-3 bg-white border border-gray-200 rounded-xl text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500 appearance-none cursor-pointer"
+              {/* Role Selection */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-3">Role</label>
+                <div className="grid grid-cols-2 gap-3">
+                  {roles.map((r) => (
+                    <button
+                      key={r.value}
+                      onClick={() => setRole(r.value)}
+                      className={`p-3 rounded-lg border-2 text-left transition-all ${
+                        role === r.value
+                          ? 'border-purple-500 bg-purple-50'
+                          : 'border-gray-200 hover:border-purple-200'
+                      }`}
                     >
-                      <option value="">Select Role</option>
-                      {roles.map(role => (
-                        <option key={role.id} value={role.id}>{role.label}</option>
-                      ))}
-                    </select>
-                    <svg className="w-5 h-5 text-gray-400 absolute right-4 top-1/2 transform -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-2">Choose the role for the new members.</p>
+                      <div className="text-2xl mb-1">{r.icon}</div>
+                      <div className="font-semibold text-gray-900">{r.label}</div>
+                      <div className="text-xs text-gray-600 mt-1">{r.description}</div>
+                    </button>
+                  ))}
                 </div>
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-3">
-                <button
-                  onClick={onBack}
-                  className="px-6 py-3 border border-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition"
-                >
-                  Cancel
-                </button>
+              <div className="flex gap-3">
                 <button
                   onClick={handleSendInvites}
-                  disabled={!emails.trim() || !selectedRole || !selectedProject || isSubmitting}
-                  className={`px-6 py-3 rounded-xl font-medium transition flex items-center gap-2 ${
-                    emails.trim() && selectedRole && selectedProject && !isSubmitting
-                      ? 'bg-purple-600 text-white hover:bg-purple-700'
-                      : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                  }`}
+                  disabled={loading}
+                  className="flex-1 bg-purple-600 text-white py-3 px-6 rounded-xl font-semibold hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                  </svg>
-                  {isSubmitting ? 'Sending...' : isEmailJSConfigured() ? 'Send Invites' : 'Generate Links'}
+                  {loading ? 'Sending...' : 'Send Invitations'}
                 </button>
               </div>
-
-              {/* Sent Invitations List */}
-              {invitations.length > 0 && (
-                <div className="mt-8 bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-                  <h3 className="text-lg font-bold text-gray-900 mb-4">Sent Invitations</h3>
-                  <div className="space-y-3">
-                    {invitations.map(invite => (
-                      <div key={invite.id} className="flex items-start justify-between p-4 bg-gray-50 rounded-xl">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-medium text-gray-900">{invite.email}</span>
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(invite.status)}`}>
-                              {invite.status}
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-500 mb-2">
-                            Project: {invite.project?.name || 'Project'} • Role: {invite.role} • 
-                            Sent: {new Date(invite.created_at).toLocaleDateString()}
-                          </p>
-                          {invite.status === 'pending' && (
-                            <div className="flex items-center gap-2">
-                              <input 
-                                type="text" 
-                                value={getInviteLink(invite.token)} 
-                                readOnly 
-                                className="flex-1 text-xs bg-white px-2 py-1 rounded border border-gray-200"
-                              />
-                              <button
-                                onClick={() => handleCopyLink(getInviteLink(invite.token))}
-                                className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 transition"
-                              >
-                                {copiedLink === getInviteLink(invite.token) ? 'Copied!' : 'Copy Link'}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        {invite.status === 'pending' && (
-                          <button
-                            onClick={() => handleCancelInvite(invite.id)}
-                            className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition ml-2"
-                            title="Cancel Invitation"
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
             </div>
 
-            {/* Right Column - Roles & Permissions */}
-            <div className="w-80">
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Roles & Permissions</h3>
-                <div className="space-y-4">
-                  {roles.map((role) => (
-                    <div key={role.id} className="flex items-start gap-3">
-                      <div className={`w-10 h-10 rounded-xl ${role.color} flex items-center justify-center text-lg flex-shrink-0`}>
-                        {role.icon}
+            {/* Sent Invitations List */}
+            {invitations.length > 0 && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Sent Invitations</h2>
+                <div className="space-y-3">
+                  {invitations.map(invite => (
+                    <div key={invite.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 font-semibold">
+                          {invite.email[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="font-medium text-gray-900">{invite.email}</div>
+                          <div className="text-sm text-gray-600">
+                            <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
+                              invite.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                              invite.status === 'accepted' ? 'bg-green-100 text-green-800' :
+                              'bg-red-100 text-red-800'
+                            }`}>
+                              {invite.status}
+                            </span>
+                            <span className="ml-2">
+                              Project: {invite.project?.name || 'Project'} • Role: {invite.role} • 
+                              Sent: {new Date(invite.created_at).toLocaleDateString()}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="font-semibold text-gray-900 text-sm">{role.label}</h4>
-                        <p className="text-xs text-gray-500 mt-0.5">{role.description}</p>
+                      <div className="flex gap-2">
+                        {invite.status === 'pending' && (
+                          <button
+                            onClick={() => handleResend(invite)}
+                            className="px-3 py-2 text-purple-600 hover:bg-purple-50 rounded-lg text-sm font-medium transition-colors"
+                          >
+                            Resend
+                          </button>
+                        )}
+                        {invite.status === 'pending' && (
+                          <button
+                            onClick={() => handleRevoke(invite.id)}
+                            className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg text-sm font-medium transition-colors"
+                          >
+                            Revoke
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
-            </div>
-
+            )}
           </div>
 
-        </main>
+          {/* Right Column - Roles & Permissions */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Roles & Permissions</h2>
+            <div className="space-y-4">
+              {roles.map((role) => (
+                <div key={role.value} className="p-4 bg-gray-50 rounded-lg">
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className="text-2xl">{role.icon}</span>
+                    <h3 className="font-semibold text-gray-900">{role.label}</h3>
+                  </div>
+                  <p className="text-gray-600 text-sm">{role.description}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-  )
-}
+  );
+};
 
-export default InviteMembers
+export default InviteMembers;

@@ -17,6 +17,7 @@ const AcceptInvitation = () => {
   const [authMode, setAuthMode] = useState('check')
 
   useEffect(() => {
+    console.log('AcceptInvitation mounted, token:', token)
     if (token) {
       fetchInvitation()
     } else {
@@ -27,46 +28,74 @@ const AcceptInvitation = () => {
 
   const fetchInvitation = async () => {
     try {
-      // First try to find the invitation by token
+      console.log('Fetching invitation with token:', token)
+
+      // Get ALL invitations with this token (don't filter by status yet)
       const { data, error } = await supabase
         .from('invitations')
         .select('*')
         .eq('token', token)
-        .single()
 
-      if (error || !data) {
+      console.log('Raw invitation data:', data)
+      console.log('Error:', error)
+
+      if (error) {
+        console.error('Database error:', error)
+        setError('Database error: ' + error.message)
+        setLoading(false)
+        return
+      }
+
+      if (!data || data.length === 0) {
+        console.log('No invitation found with this token')
         setError('This invitation link is invalid or has expired')
         setLoading(false)
         return
       }
 
-      // Check if already accepted
-      if (data.status === 'accepted') {
+      const invitationData = data[0]
+      console.log('Found invitation:', invitationData)
+
+      // Check status
+      if (invitationData.status === 'accepted') {
+        console.log('Invitation already accepted')
         setError('This invitation has already been accepted. Please sign in to access the project.')
         setLoading(false)
         return
       }
 
+      if (invitationData.status !== 'pending') {
+        console.log('Invitation status:', invitationData.status)
+        setError('This invitation is no longer valid (status: ' + invitationData.status + ')')
+        setLoading(false)
+        return
+      }
+
       // Check if expired (7 days)
-      const createdDate = new Date(data.created_at)
+      const createdDate = new Date(invitationData.created_at)
       const now = new Date()
       const diffDays = (now - createdDate) / (1000 * 60 * 60 * 24)
 
+      console.log('Invitation age (days):', diffDays)
+
       if (diffDays > 7) {
+        console.log('Invitation expired')
         setError('This invitation has expired. Please ask the project owner to send a new invitation.')
         setLoading(false)
         return
       }
 
-      setInvitation(data)
-      setEmail(data.email)
+      setInvitation(invitationData)
+      setEmail(invitationData.email)
 
       // Check if user already exists with this email
       const { data: existingUser } = await supabase
         .from('profiles')
         .select('id')
-        .eq('email', data.email)
+        .eq('email', invitationData.email)
         .single()
+
+      console.log('Existing user:', existingUser)
 
       if (existingUser) {
         setAuthMode('signin')
@@ -76,8 +105,8 @@ const AcceptInvitation = () => {
 
       setLoading(false)
     } catch (err) {
-      console.error('Error fetching invitation:', err)
-      setError('Failed to load invitation. Please try again or contact support.')
+      console.error('Exception in fetchInvitation:', err)
+      setError('Failed to load invitation: ' + err.message)
       setLoading(false)
     }
   }
@@ -88,6 +117,7 @@ const AcceptInvitation = () => {
     setError('')
 
     try {
+      console.log('Signing up with email:', email)
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email,
         password: password,
@@ -95,6 +125,8 @@ const AcceptInvitation = () => {
           data: { full_name: fullName }
         }
       })
+
+      console.log('Sign up result:', authData, authError)
 
       if (authError) throw authError
 
@@ -114,10 +146,13 @@ const AcceptInvitation = () => {
     setError('')
 
     try {
+      console.log('Signing in with email:', email)
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: email,
         password: password
       })
+
+      console.log('Sign in result:', authData, authError)
 
       if (authError) throw authError
 
@@ -133,6 +168,8 @@ const AcceptInvitation = () => {
 
   const joinProject = async (userId) => {
     try {
+      console.log('Joining project:', invitation.project_id, 'for user:', userId)
+
       // Add user to project_members
       const { error: memberError } = await supabase
         .from('project_members')
@@ -144,6 +181,8 @@ const AcceptInvitation = () => {
           status: 'active'
         }])
 
+      console.log('Member insert result:', memberError)
+
       if (memberError) throw memberError
 
       // Update invitation status
@@ -151,6 +190,8 @@ const AcceptInvitation = () => {
         .from('invitations')
         .update({ status: 'accepted' })
         .eq('id', invitation.id)
+
+      console.log('Invitation update result:', inviteError)
 
       if (inviteError) throw inviteError
     } catch (err) {
@@ -170,7 +211,10 @@ const AcceptInvitation = () => {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-spin h-10 w-10 border-4 border-purple-500 border-t-transparent rounded-full"></div>
+        <div className="text-center">
+          <div className="animate-spin h-10 w-10 border-4 border-purple-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+          <p className="text-gray-500">Loading invitation...</p>
+        </div>
       </div>
     )
   }
