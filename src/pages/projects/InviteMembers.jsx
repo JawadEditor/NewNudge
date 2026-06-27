@@ -67,6 +67,39 @@ const InviteMembers = ({ project, onBack, onLogout }) => {
     return `${window.location.origin}/accept-invitation/${token}`;
   };
 
+  const createNotification = async (userId, title, message) => {
+    try {
+      if (!userId) {
+        console.log('No userId provided, skipping notification');
+        return;
+      }
+
+      const notificationData = {
+        user_id: userId,
+        type: 'invitation',
+        title: title || 'Invitation Sent',
+        message: message || '',
+        data: { project_id: project?.id || selectedProjectId },
+        read: false,
+        created_at: new Date().toISOString()
+      };
+
+      console.log('Creating notification:', notificationData);
+
+      const { error } = await supabase
+        .from('notifications')
+        .insert(notificationData);
+
+      if (error) {
+        console.error('Notification creation error:', error);
+        // Don't throw - notifications are not critical
+      }
+    } catch (err) {
+      console.error('Failed to create notification:', err);
+      // Don't throw - notifications are not critical
+    }
+  };
+
   const handleSendInvites = async () => {
     setLoading(true);
     setError('');
@@ -93,7 +126,7 @@ const InviteMembers = ({ project, onBack, onLogout }) => {
 
       const senderName = profileData?.full_name || userData.user.email;
 
-      // Generate invitation data - no role, just member
+      // Generate invitation data - no role
       const invitationsData = emailList.map(email => ({
         project_id: projectId,
         email: email,
@@ -122,6 +155,13 @@ const InviteMembers = ({ project, onBack, onLogout }) => {
       if (!savedInvites || savedInvites.length === 0) {
         throw new Error('No invitations were saved to the database');
       }
+
+      // Create notification for sender (optional - don't fail if this errors)
+      await createNotification(
+        userData.user.id,
+        'Invitations Sent',
+        `Successfully sent ${savedInvites.length} invitation(s)`
+      );
 
       // Refresh invitations list
       await fetchInvitations();

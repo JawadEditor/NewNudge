@@ -114,7 +114,7 @@ const AcceptInvitation = () => {
         console.error('Profile creation error:', profileError);
       }
 
-      // 3. Add to project_members as regular member (no special role)
+      // 3. Add to project_members as regular member
       const { error: memberError } = await supabase
         .from('project_members')
         .insert({

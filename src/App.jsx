@@ -14,6 +14,7 @@ import TeamMembers from './pages/projects/TeamMembers.jsx'
 import Profile from './pages/profile/Profile.jsx'
 import Settings from './pages/settings/Settings.jsx'
 import AllTickets from './pages/tickets/AllTickets.jsx'
+import AcceptInvitation from './pages/team/AcceptInvitation.jsx'
 import { supabase } from './services/supabase.js'
 
 function App() {
@@ -25,6 +26,9 @@ function App() {
   const [selectedProjectId, setSelectedProjectId] = useState(null)
   const [currentView, setCurrentView] = useState('dashboard')
   const [previousView, setPreviousView] = useState('dashboard')
+  // NEW: Check if we're on the accept-invitation route
+  const [isAcceptInvitation, setIsAcceptInvitation] = useState(false)
+  const [invitationToken, setInvitationToken] = useState(null)
 
   useEffect(() => {
     const initializeAuth = async () => {
@@ -50,6 +54,26 @@ function App() {
     })
 
     return () => subscription?.unsubscribe?.()
+  }, [])
+
+  // NEW: Check URL for accept-invitation route
+  useEffect(() => {
+    const checkInvitationRoute = () => {
+      const path = window.location.pathname
+      const match = path.match(/^\/accept-invitation\/(.+)$/)
+      if (match) {
+        setIsAcceptInvitation(true)
+        setInvitationToken(match[1])
+      } else {
+        setIsAcceptInvitation(false)
+        setInvitationToken(null)
+      }
+    }
+
+    checkInvitationRoute()
+    // Listen for URL changes
+    window.addEventListener('popstate', checkInvitationRoute)
+    return () => window.removeEventListener('popstate', checkInvitationRoute)
   }, [])
 
   const handleForgotPassword = () => {
@@ -148,6 +172,11 @@ function App() {
         <div className="animate-spin h-10 w-10 border-4 border-purple-500 border-t-transparent rounded-full"></div>
       </div>
     )
+  }
+
+  // NEW: Show AcceptInvitation for invitation route (no auth needed)
+  if (isAcceptInvitation) {
+    return <AcceptInvitation />
   }
 
   if (!isAuthenticated) {

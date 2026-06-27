@@ -10,8 +10,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <ErrorBoundary>
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<App />} />
-        <Route path="/accept-invite" element={<AcceptInvitation />} />
+        <Route path="/*" element={<App />} />
+        <Route path="/accept-invitation/:token" element={<AcceptInvitation />} />
       </Routes>
     </BrowserRouter>
   </ErrorBoundary>
