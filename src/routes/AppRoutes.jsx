@@ -39,15 +39,15 @@ const AppRoutes = () => {
 
   return (
     <Routes>
-      {/* Public Routes */}
+      {/* Public Routes - No auth required */}
       <Route path="/login" element={!user ? <Login /> : <Navigate to="/dashboard" />} />
       <Route path="/register" element={!user ? <Register /> : <Navigate to="/dashboard" />} />
       <Route path="/reset-password" element={<ResetPassword />} />
 
-      {/* Accept Invitation - Public route (no auth required) */}
+      {/* Accept Invitation - Public route, must be OUTSIDE MainLayout */}
       <Route path="/accept-invitation/:token" element={<AcceptInvitation />} />
 
-      {/* Protected Routes */}
+      {/* Protected Routes - Wrapped in MainLayout */}
       <Route element={<MainLayout />}>
         <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/login" />} />
         <Route path="/profile" element={user ? <Profile /> : <Navigate to="/login" />} />
@@ -64,11 +64,11 @@ const AppRoutes = () => {
         <Route path="/tickets" element={user ? <AllTickets /> : <Navigate to="/login" />} />
         <Route path="/tickets/create" element={user ? <CreateTicket /> : <Navigate to="/login" />} />
 
-        {/* Redirect root */}
+        {/* Redirect root to dashboard or login */}
         <Route path="/" element={<Navigate to={user ? "/dashboard" : "/login"} />} />
       </Route>
 
-      {/* 404 Fallback */}
+      {/* 404 Fallback - redirect to home */}
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );
