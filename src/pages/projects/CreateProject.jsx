@@ -119,7 +119,7 @@ const CreateProject = ({ onBack, onLogout, previousView, onProjectCreated }) => 
 
       // Call callback after short delay so user sees toast
       setTimeout(() => {
-        onProjectCreated && onProjectCreated(project.id)
+        onProjectCreated && onProjectCreated(project?.id || project?.data?.id)
       }, 1500)
 
     } catch (err) {

@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react'
+﻿import { useEffect, useState } from 'react'
 import FlashScreen from './components/FlashScreen.jsx'
 import Login from './pages/auth/Login.jsx'
 import Register from './pages/auth/Register.jsx'
@@ -14,8 +14,7 @@ import TeamMembers from './pages/projects/TeamMembers.jsx'
 import Profile from './pages/profile/Profile.jsx'
 import Settings from './pages/settings/Settings.jsx'
 import AllTickets from './pages/tickets/AllTickets.jsx'
-import { projectsApi, ticketsApi, membersApi, dashboardApi } from './services/api.js'
-
+import { supabase } from './services/supabase.js'
 
 function App() {
   const [showFlash, setShowFlash] = useState(true)
@@ -28,19 +27,30 @@ function App() {
   const [previousView, setPreviousView] = useState('dashboard')
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
-    if (token) {
-      setIsAuthenticated(true)
+    const initializeAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      setIsAuthenticated(!!session)
+      setShowLogin(!session)
+      setShowFlash(!session)
+      setCurrentView('dashboard')
+      setSelectedProjectId(null)
+      setIsLoading(false)
     }
-    setCurrentView('dashboard')
-    setSelectedProjectId(null)
-    setIsLoading(false)
-  }, [])
 
-  const handleViewProfile = () => {
-    setPreviousView(currentView)
-    setCurrentView('profile')
-  }
+    initializeAuth()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAuthenticated(!!session)
+      setShowLogin(!session)
+      setShowFlash(!session)
+      if (!session) {
+        setCurrentView('dashboard')
+        setSelectedProjectId(null)
+      }
+    })
+
+    return () => subscription?.unsubscribe?.()
+  }, [])
 
   const handleForgotPassword = () => {
     setShowResetPassword(true)
@@ -58,18 +68,26 @@ function App() {
 
   const handleLoginSuccess = () => {
     setIsAuthenticated(true)
+    setShowResetPassword(false)
+    setShowLogin(false)
+    setShowFlash(false)
     setCurrentView('dashboard')
     setSelectedProjectId(null)
   }
 
-  const handleLogout = () => {
-    localStorage.removeItem('token')
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut()
+    } catch (error) {
+      console.error('Logout failed:', error)
+    }
+
     setIsAuthenticated(false)
     setShowFlash(true)
     setShowLogin(true)
+    setShowResetPassword(false)
     setCurrentView('dashboard')
     setSelectedProjectId(null)
-    window.location.reload()
   }
 
   const handleViewProject = (id) => {
@@ -98,14 +116,6 @@ function App() {
     setCurrentView(previousView)
   }
 
-  const handleBackToProject = () => {
-    if (previousView === 'team-members') {
-      setCurrentView('team-members')
-    } else {
-      setCurrentView('project')
-    }
-  }
-
   const handleInviteMembers = () => {
     setPreviousView(currentView)
     setCurrentView('invite')
@@ -116,8 +126,10 @@ function App() {
     setCurrentView('create-project')
   }
 
-  const handleBackToDashboardFromCreate = () => {
-    setCurrentView('dashboard')
+  const handleProjectCreated = (projectId) => {
+    setSelectedProjectId(projectId)
+    setPreviousView('projects')
+    setCurrentView('project')
   }
 
   const handleViewTeamMembers = () => {
@@ -280,7 +292,8 @@ function App() {
             <CreateProject 
               onBack={handleGoBack}
               previousView={previousView}
-              onLogout={handleLogout} 
+              onLogout={handleLogout}
+              onProjectCreated={handleProjectCreated}
             />
           )}
 

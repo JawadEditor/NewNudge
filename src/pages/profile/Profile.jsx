@@ -165,24 +165,49 @@ const Profile = ({ onBack, onLogout }) => {
   }
 
   const handleUpdatePassword = async () => {
+    if (!passwords.current || !passwords.new || !passwords.confirm) {
+      setMessage('Please fill in your current password, new password, and confirmation.')
+      return
+    }
+
     if (passwords.new !== passwords.confirm) {
       setMessage('Passwords do not match!')
       return
     }
 
+    if (passwords.new.length < 6) {
+      setMessage('New password must be at least 6 characters long.')
+      return
+    }
+
     try {
-      const { error } = await supabase.auth.updateUser({
+      const { data: { user } } = await supabase.auth.getUser()
+
+      if (!user?.email) {
+        throw new Error('Unable to verify your account.')
+      }
+
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: passwords.current
+      })
+
+      if (signInError) {
+        throw new Error('Current password is incorrect.')
+      }
+
+      const { error: updateError } = await supabase.auth.updateUser({
         password: passwords.new
       })
 
-      if (error) throw error
+      if (updateError) throw updateError
 
       setMessage('Password updated successfully!')
       setPasswords({ current: '', new: '', confirm: '' })
       setTimeout(() => setMessage(''), 3000)
     } catch (err) {
       console.error('Error updating password:', err)
-      setMessage('Error updating password. Please try again.')
+      setMessage(err.message || 'Error updating password. Please try again.')
     }
   }
 

@@ -1,23 +1,32 @@
 import { useState } from 'react'
+import { supabase } from '../../services/supabase.js'
 
 const ResetPassword = ({ onBackToLogin }) => {
   const [email, setEmail] = useState('')
   const [isSubmitted, setIsSubmitted] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [message, setMessage] = useState('')
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!email.trim()) return
-    
+
     setIsLoading(true)
-    
-    // Simulate API call - replace with actual Supabase call
-    // const { error } = await supabase.auth.resetPasswordForEmail(email)
-    
-    setTimeout(() => {
-      setIsLoading(false)
-      setIsSubmitted(true)
-    }, 1500)
+    setMessage('')
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/`
+    })
+
+    setIsLoading(false)
+
+    if (error) {
+      setMessage(error.message)
+      return
+    }
+
+    setIsSubmitted(true)
+    setMessage('Check your email for the reset link.')
   }
 
   return (
@@ -42,7 +51,12 @@ const ResetPassword = ({ onBackToLogin }) => {
 
         {/* Form Card */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
-          
+          {message && (
+            <div className={`mb-4 rounded-xl border px-4 py-3 text-sm ${message.includes('Error') || message.includes('failed') ? 'border-red-200 bg-red-50 text-red-600' : 'border-green-200 bg-green-50 text-green-600'}`}>
+              {message}
+            </div>
+          )}
+
           {!isSubmitted ? (
             <form onSubmit={handleSubmit}>
               <div className="mb-6">
@@ -97,12 +111,13 @@ const ResetPassword = ({ onBackToLogin }) => {
               </div>
               <h3 className="text-lg font-bold text-gray-900 mb-2">Email Sent!</h3>
               <p className="text-gray-500 mb-6">
-                We've sent password reset instructions to <span className="font-medium text-gray-700">{email}</span>
+                We&apos;ve sent password reset instructions to <span className="font-medium text-gray-700">{email}</span>
               </p>
               <button
                 onClick={() => {
                   setIsSubmitted(false)
                   setEmail('')
+                  setMessage('')
                 }}
                 className="text-purple-600 font-medium hover:text-purple-700"
               >

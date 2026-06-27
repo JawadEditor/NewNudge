@@ -10,25 +10,23 @@ const Login = ({ onSwitchToRegister, onLoginSuccess, onForgotPassword }) => {
   const [error, setError] = useState('')
 
   const handleLogin = async (e) => {
-  e.preventDefault()
-  setError('')
-  setLoading(true)
+    e.preventDefault()
+    setError('')
+    setLoading(true)
 
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  })
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
 
-  setLoading(false)
+    setLoading(false)
 
-  if (error) {
-    setError(error.message)
-  } else {
-    localStorage.setItem('token', data.session.access_token)
-    // Replace window.location.href with onLoginSuccess
-    if (onLoginSuccess) onLoginSuccess()
+    if (error) {
+      setError(error.message)
+    } else if (onLoginSuccess) {
+      onLoginSuccess(data.session)
+    }
   }
-}
   const handleSignUp = async () => {
     if (!email || !password) {
       setError('Please enter email and password')

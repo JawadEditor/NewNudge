@@ -1,0 +1,4 @@
+@echo off
+set PAT=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
+git config credential.helper store
+git push -u origin main
