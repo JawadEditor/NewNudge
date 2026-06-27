@@ -16,10 +16,34 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
     completed: 0
   })
   const [deleteModal, setDeleteModal] = useState({ show: false, ticket: null })
+  const [currentUser, setCurrentUser] = useState(null)
+  const [isOwner, setIsOwner] = useState(false)
 
   useEffect(() => {
+    fetchCurrentUser()
     fetchTickets()
   }, [projectId])
+
+  const fetchCurrentUser = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      setCurrentUser(user)
+
+      // Check if user is owner of any project (simplified check)
+      // In a real app, you'd check if user is owner of the specific project
+      if (user) {
+        const { data: projects } = await supabase
+          .from('projects')
+          .select('id')
+          .eq('created_by', user.id)
+          .limit(1)
+
+        setIsOwner(projects && projects.length > 0)
+      }
+    } catch (err) {
+      console.error('Error fetching user:', err)
+    }
+  }
 
   const fetchTickets = async () => {
     try {
@@ -29,7 +53,7 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
         .from('tickets')
         .select(`
           *,
-          projects(id, name)
+          projects(id, name, created_by)
         `)
         .order('updated_at', { ascending: false })
 
@@ -88,8 +112,14 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
       setDeleteModal({ show: false, ticket: null })
     } catch (error) {
       console.error('Error deleting ticket:', error)
-      alert('Failed to delete ticket')
+      alert('Failed to delete ticket: ' + (error.message || 'You do not have permission to delete this ticket'))
     }
+  }
+
+  // Check if current user is the owner of the ticket's project
+  const isTicketOwner = (ticket) => {
+    if (!currentUser || !ticket.projects) return false
+    return ticket.projects.created_by === currentUser.id
   }
 
   const getStatusColor = (status) => {
@@ -357,19 +387,21 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
                   <span className="text-sm text-gray-500">
                     {ticket.updated_at ? new Date(ticket.updated_at).toLocaleDateString() : 'Recently'}
                   </span>
-                  {/* Delete Button */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setDeleteModal({ show: true, ticket })
-                    }}
-                    className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition opacity-0 group-hover:opacity-100"
-                    title="Delete Ticket"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
+                  {/* Delete Button - ONLY SHOW FOR PROJECT OWNERS */}
+                  {isTicketOwner(ticket) && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setDeleteModal({ show: true, ticket })
+                      }}
+                      className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition opacity-0 group-hover:opacity-100"
+                      title="Delete Ticket"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -398,8 +430,8 @@ const AllTickets = ({ onBack, onLogout, onViewTicket, onCreateTicket, projectId 
 
       </main>
 
-      {/* Delete Confirmation Modal */}
-      {deleteModal.show && (
+      {/* Delete Confirmation Modal - ONLY FOR OWNERS */}
+      {deleteModal.show && isTicketOwner(deleteModal.ticket) && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full mx-4">
             <div className="flex items-center gap-3 mb-4">
